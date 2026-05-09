@@ -1,21 +1,56 @@
+# Import Active Directory module
 Import-Module ActiveDirectory
 
-$users = Import-Csv ".\data\users.csv"
+# Path to your CSV file
+$csvPath = "C:\Automation\users.csv"
+
+# Import users from CSV
+$users = Import-Csv -Path $csvPath
+
+function New-RandomPassword {
+    param([int]$length = 12)
+
+    $chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()'
+    $rand = New-Object System.Random
+    -join (1..$length | ForEach-Object { $chars[$rand.Next(0, $chars.Length)] })
+}
 
 foreach ($user in $users) {
+    $firstName   = $user.FirstName
+    $lastName    = $user.LastName
+    $department  = $user.Department
+    $jobTitle    = $user.JobTitle
 
-    $securePassword = ConvertTo-SecureString $user.Password -AsPlainText -Force
+    # Generate SamAccountName (first initial + last name, lowercase)
+    $samAccountName = ($firstName.Substring(0,1) + $lastName).ToLower()
 
-    New-ADUser `
-        -Name "$($user.FirstName) $($user.LastName)" `
-        -GivenName $user.FirstName `
-        -Surname $user.LastName `
-        -SamAccountName $user.Username `
-        -UserPrincipalName "$($user.Username)@lab.local" `
-        -AccountPassword $securePassword `
-        -Enabled $true `
-        -Path "OU=$($user.Department),DC=lab,DC=local"
+    # Construct UPN
+    $upn = "$samAccountName@corp.local"
 
-    # Add user to department group
-    Add-ADGroupMember -Identity $user.Department -Members $user.Username
+    # Generate a random password
+    $password = New-RandomPassword 12
+
+    # OU path based on Department (must match your AD exactly)
+    $ou = "OU=$department,DC=corp,DC=local"
+
+    try {
+        New-ADUser `
+            -GivenName $firstName `
+            -Surname $lastName `
+            -SamAccountName $samAccountName `
+            -UserPrincipalName $upn `
+            -Name "$firstName $lastName" `
+            -DisplayName "$firstName $lastName" `
+            -Department $department `
+            -Title $jobTitle `
+            -Path $ou `
+            -AccountPassword (ConvertTo-SecureString $password -AsPlainText -Force) `
+            -Enabled $true `
+            -ChangePasswordAtLogon $true
+
+        Write-Host "Created user: $firstName $lastName ($samAccountName) in $department OU"
+    }
+    catch {
+        Write-Warning "Failed to create $firstName $lastName ($samAccountName). OU $ou not found."
+    }
 }
